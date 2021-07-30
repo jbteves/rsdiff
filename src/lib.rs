@@ -6,7 +6,8 @@
 
 use std::{
     fs::{self, File},
-    io::{BufRead, BufReader}
+    io::{BufRead, BufReader},
+    convert::{TryInto},
 };
 
 /// Diff
@@ -60,6 +61,8 @@ pub fn differ<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
     diff_bytes(left, right)
 }
 
+
+
 /// Perform a diff on two files of unknown or binary encoding.
 pub fn diff_bytes<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
     // Obtain metadata
@@ -78,15 +81,21 @@ pub fn diff_bytes<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
 
     // Initialize the Diff object, since one may be computed
     let mut d = Diff::new(left, right);
-    
+
+    // Check to see if file sizes match; if so, figure out the total number
+    // of matching bytes.
     if left_meta.len() == right_meta.len() {
-        // Iterate over 8kB chunks to compare bytes
-        const CHUNK_SIZE: usize = 8192;
+        // Iterate over 256kB chunks to compare bytes. Tested with a MacOS
+        // system using an SSD, picked the smallest chunk size that seemed
+        // to not reduce performance.
+        const KILOBYTE: usize = 1024;
+        const CHUNK_SIZE: usize = 256 * KILOBYTE;
         // Track the length of the files with a convenient alias
-        let fsize = left_meta.len();
+        let fsize: usize = left_meta.len().try_into().unwrap();
         // File pointers and buffer readers
         let left_file = File::open(left).expect("Uh-oh!");
         let right_file = File::open(right).expect("Uh-oh!");
+        let mut total_matches: usize = 0;
         let mut left_reader = BufReader::with_capacity(
             CHUNK_SIZE, left_file
         );
@@ -94,19 +103,21 @@ pub fn diff_bytes<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
             CHUNK_SIZE, right_file
         );
         // Track total matches
-        let mut total_matches = 0;
-        // Loop until we hit EOF
         loop {
             // Ask to read, get a length for how many bytes were read
-            let left_buffer = left_reader.fill_buf().expect("Uh-oh 2!");
-            let right_buffer = right_reader.fill_buf().expect("Uh-oh 2!");
-            // Left and right buffer should be same; we'll reference left
-            if left_buffer.len() != 0 {
-                // We have bytes to compare
-                total_matches += diff_buffer(left_buffer, right_buffer);
-            }
-            else {
-                // We hit EOF
+            let length = {
+                let left_buffer = left_reader.fill_buf().expect("Uh-oh 2!");
+                let right_buffer = right_reader.fill_buf().expect("Uh-h 3!");
+                if left_buffer.len() != 0 {
+                    total_matches += diff_buffer(
+                        left_buffer,
+                        right_buffer);
+                }
+                left_buffer.len()
+            };
+            left_reader.consume(length);
+            right_reader.consume(length);
+            if length == 0 {
                 break;
             }
         }
@@ -116,7 +127,7 @@ pub fn diff_bytes<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
         let similarity = total_matches as f32 / fsize as f32;
         d.similarity = similarity;
         // If not a complete match, need to fill in additional info
-        if d.matches {
+        if !d.matches {
             let percentage = similarity * 100.0;
             d.additional_info = String::from(
                 format!(
@@ -145,14 +156,14 @@ pub fn diff_bytes<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
             format!("{} vs {}: {}", d.left, d.right, d.additional_info)
         );
     }
-    
+
     return d;
 }
 
 
 /// Calculate how many bytes match between two buffers. The buffers must be
 /// of equal size.
-pub fn diff_buffer<'a>(left: &[u8], right: &[u8]) -> u64 {
+pub fn diff_buffer<'a>(left: &[u8], right: &[u8]) -> usize {
     // Verify arrays match in size
     if !(left.len() == right.len()) {
         panic!("Buffers supplied to rsdiff::diff_buffer must have the \
@@ -160,84 +171,10 @@ pub fn diff_buffer<'a>(left: &[u8], right: &[u8]) -> u64 {
                left.len(), right.len());
     }
     // Iterate and compare bytes
-    let mut matches: u64 = 0;
+    let mut matches: usize = 0;
     for it in left.iter().zip(right.iter()) {
         let (a, b) = it;
-        matches += (a == b) as u64;
+        matches += (a == b) as usize;
     }
     return matches
-}
-
-
-// ------------------------
-// Private Helper Functions
-// ------------------------
-/// PositiveIndex
-/// Object for constraining a value to the range [0.0, 1.0].
-#[derive(Debug)]
-struct PositiveIndex {
-    /// The value held by the index
-    value: f32
-}
-
-impl PositiveIndex {
-    /// Create a new PositiveIndex from floating-point
-    fn from(value: f32) -> PositiveIndex {
-        if value < 0.0  || value > 1.0 {
-            panic!(
-                "PositiveIndex must be in [0.0, 1.0], but has value {}",
-                value
-            )
-        }
-        PositiveIndex { value }
-    }
-    /// Create a zero-index
-    fn zero() -> PositiveIndex { PositiveIndex { value: 0.0 } }
-    /// Create a one-index
-    fn one() -> PositiveIndex { PositiveIndex { value: 1.0 } }
-    /// Get the underlying value
-    fn value(&self) -> f32 { return self.value }
-}
-
-// -----
-// Tests
-// -----
-/// Tests for the rsdiff library
-#[cfg(test)]
-mod tests {
-    /// Tests for PositiveIndex
-    mod positive_index{
-        use crate::PositiveIndex;
-        /// Make sure that PositiveIndex::from fails for negative float
-        #[test]
-        #[should_panic(expected = "PositiveIndex must be in [0.0, 1.0], but has value -0.5")]
-        fn from_panics_negative() {
-            PositiveIndex::from(-0.5);
-        }
-        /// Make sure that PositiveIndex::from fails for float > 1.0
-        #[test]
-        #[should_panic(expected = "PositiveIndex must be in [0.0, 1.0], but has value 1.1")]
-        fn from_panics_large() {
-            PositiveIndex::from(1.1);
-        }
-        /// Make sure that PositiveIndex::from and PositiveIndex::value
-        /// work as intended.
-        #[test]
-        fn from_value_works() {
-            let val = PositiveIndex::from(0.5).value();
-            assert!(val == 0.5);
-        }
-        /// Make sure that PositiveIndex::zero works
-        #[test]
-        fn zero_works() {
-            let pi = PositiveIndex::zero();
-            assert!(pi.value == 0.0);
-        }
-        /// Make sure that PositiveIndex::one works
-        #[test]
-        fn one_works() {
-            let pi = PositiveIndex::one();
-            assert!(pi.value == 1.0);
-        }
-    }
 }
