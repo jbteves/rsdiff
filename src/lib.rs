@@ -9,7 +9,10 @@ use std::{
     io::{self, BufRead, BufReader},
     convert::TryInto,
     path::Path,
+    time,
 };
+
+use nifti::{NiftiObject, ReaderOptions, IntoNdArray};
 
 /// Diff
 /// Generalized object for performing abstract diffs.
@@ -66,6 +69,10 @@ pub fn differ(left: &str, right: &str) -> Diff {
         return diff_directory(left, right);
     }
     else {
+        // Check for specializations
+        if left.ends_with(".nii.gz") || left.ends_with(".nii") {
+            return diff_nii(left, right);
+        }
         return diff_bytes(left, right);
     }
 }
@@ -264,6 +271,82 @@ pub fn diff_bytes(left: &str, right: &str) -> Diff {
 
     return d;
 }
+
+/// Diff two niftis
+pub fn diff_nii(left: &str, right: &str) -> Diff {
+    const TOLERANCE: f32 = 1e-16;
+    // Load headers
+    let left_reader = ReaderOptions::new().read_file(left)
+        .expect("Cannot read left file as nifti!");
+    let right_reader = ReaderOptions::new().read_file(right)
+        .expect("Cannot read right file as nifti!");
+
+    // Since both files exist, make a new Diff object
+    let mut d = Diff::new(left, right);
+    // Check to see if shapes match
+    let shapes_match = 
+        left_reader.header().dim == right_reader.header().dim;
+    if shapes_match {
+        let t0 = time::SystemTime::now();
+        // Read in entire files and see if they match
+        let left_data = left_reader.into_volume().into_ndarray::<f32>()
+            .expect("Cannot read left file as ndarray!");
+        let t1 = time::SystemTime::now();
+        let right_data = right_reader.into_volume().into_ndarray::<f32>()
+            .expect("Cannot read right file as ndarray!");
+        let t2 = time::SystemTime::now();
+        // Iterate over all of left and right, seeing which voxels are
+        // below the tolerance
+        let total_matches = left_data.iter().zip(right_data.iter())
+            .map(|(a, b)| ((a - b).abs() < TOLERANCE) as usize)
+            .sum::<usize>();
+        let t3 = time::SystemTime::now();
+        // FIXME: delete
+        println!(
+            "Time to read left: {}\n\
+            Time to read right: {}\n\
+            Time to perform diff: {}\n",
+            t1.duration_since(t0).expect("Time error").as_millis(),
+            t2.duration_since(t1).expect("Time error").as_millis(),
+            t3.duration_since(t2).expect("Time error").as_millis(),
+        );
+        let total_voxels: usize = left_data.shape().iter().product();
+        // See if we match
+        if total_voxels == total_matches {
+            // Complete match
+            d.matches = true
+        }
+        else {
+            // We can build a report
+            let percentage_match =
+                total_matches as f32 / total_voxels as f32 * 100.0;
+            d.additional_info = format!(
+                "Voxels diverge: {} of {} match ({:04.2}%)",
+                total_matches,
+                total_voxels,
+                percentage_match
+            );
+        }
+    }
+    else {
+        // We can build a report for shape mismatch
+        d.additional_info = format!(
+            "Shapes diverge: {:#?} vs. {:#?}",
+            left_reader.header().dim().expect("Bad dimensions"),
+            right_reader.header().dim().expect("Bad dimensions"),
+        );
+    }
+
+    // Build report
+    if !d.matches {
+        d.report = format!(
+            "{} vs. {}: {}", left, right, d.additional_info
+        );
+    }
+
+    return d;
+}
+
 
 
 /// Calculate how many bytes match between two buffers. The buffers must be
