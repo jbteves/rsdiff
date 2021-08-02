@@ -8,6 +8,7 @@ use rsdiff::differ;
 
 /// Run a differ on two objects
 fn main() {
+    
     let matches = App::new("rsdiff")
                     .version("0.1")
                     .author("Joshua B. Teves <joshua.teves@nih.gov>")
@@ -18,6 +19,11 @@ fn main() {
                     .arg(Arg::with_name("right")
                          .help("The right object to diff")
                          .required(true))
+                    .arg(Arg::with_name("debug")
+                         .long("debug")
+                         .takes_value(false)
+                         .help("Run in debug mode")
+                         .required(false))
                     .get_matches();
 
     let left = matches.value_of("left").unwrap();
@@ -25,5 +31,8 @@ fn main() {
     let d = differ(left, right);
     if !d.matches {
         println!("{}", d.report);
+    }
+    if matches.is_present("debug") {
+        println!("{:?}", d);
     }
 }

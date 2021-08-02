@@ -6,26 +6,27 @@
 
 use std::{
     fs::{self, File},
-    io::{BufRead, BufReader},
-    convert::{TryInto},
+    io::{self, BufRead, BufReader},
+    convert::TryInto,
+    path::Path,
 };
 
 /// Diff
 /// Generalized object for performing abstract diffs.
 #[derive(Debug)]
-pub struct Diff<'a> {
+pub struct Diff {
     /// The left object for the diff.
-    pub left: &'a str,
+    pub left: String,
     /// The right object for the diff.
-    pub right: &'a str,
+    pub right: String,
     /// Whether the objects match
     pub matches: bool,
     /// Objects which only exist in the left object.
-    pub left_only: Vec<&'a str>,
+    pub left_only: Vec<String>,
     /// Objects which only exist in the right object.
-    pub right_only: Vec<&'a str>,
+    pub right_only: Vec<String>,
     /// Objects which are common to the left and right objects.
-    pub common: Vec<&'a str>,
+    pub common: Vec<String>,
     /// Generalized similarity index.
     pub similarity: f32,
     /// Any additional information.
@@ -33,17 +34,17 @@ pub struct Diff<'a> {
     /// Any sub-diffs that may want to be represented, for example, if this
     /// Diff object represents a directory that may contain files that also
     /// have diffs.
-    pub sub_diffs: Vec<Box<Diff<'a>>>,
+    pub sub_diffs: Vec<Box<Diff>>,
     /// The string report that may be printed.
     pub report: String,
 }
 
-impl <'a> Diff<'a> {
+impl Diff {
     /// Create a default diff to be built on.
-    pub fn new<'b>(left: &'b str, right: &'b str) -> Diff<'b> {
+    pub fn new(left: &str, right: &str) -> Diff {
         Diff {
-            left,
-            right,
+            left: String::from(left),
+            right: String::from(right),
             matches: false,
             left_only: vec!(),
             right_only: vec!(),
@@ -57,14 +58,118 @@ impl <'a> Diff<'a> {
 }
 
 /// Calculate an abstract diff between two files.
-pub fn differ<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
-    diff_bytes(left, right)
+pub fn differ(left: &str, right: &str) -> Diff {
+    let left_meta = fs::metadata(left).expect("Left doesn't exist");
+    let _right_meta = fs::metadata(right).expect("Right doesn't exist");
+
+    if left_meta.is_dir() {
+        return diff_directory(left, right);
+    }
+    else {
+        return diff_bytes(left, right);
+    }
 }
 
 
+// TODO: clean this mess up
+/// Calculate an abstract diff between two directories
+pub fn diff_directory(left: &str, right: &str) -> Diff {
+    // Obtain metadata
+    let left_meta = fs::metadata(left).expect("Left dir didn't exist");
+    let right_meta = fs::metadata(right).expect("Right dir didn't exist");
+
+    // Check that both left and right are files
+    if !(left_meta.is_dir()) {
+        if !(right_meta.is_dir()) {
+            panic!("Left and right are not dirs!")
+        }
+        else {
+            panic!("Left is not a dir!")
+        }
+    }
+
+    // Initialize the Diff object, since one may be computed
+    let mut d = Diff::new(left, right);
+
+    // Get PathBuf objects for the contents of left and right
+    let left_contents = fs::read_dir(left).expect("Boo")
+        .map(|res| res.map(|e| e.path()))
+        .collect::<Result<Vec<_>, io::Error>>().expect("Boo");
+    let right_contents = fs::read_dir(right).expect("Boo")
+        .map(|res| res.map(|e| e.path()))
+        .collect::<Result<Vec<_>, io::Error>>().expect("Boo");
+
+    // Get the object names only to compare
+    let left_onames: Vec<String> = left_contents.iter()
+        .map(|o| String::from(o.file_name().unwrap().to_str().unwrap()))
+        .collect();
+    let right_onames: Vec<String> = right_contents.iter()
+        .map(|o| String::from(o.file_name().unwrap().to_str().unwrap()))
+        .collect();
+
+    // This is inefficient, but we don't expect to deal with more than a
+    // few hundred files per directory in this case
+    // TODO: come up with a more efficient algorithm
+    for x in left_onames.into_iter() {
+        if right_onames.contains(&x) {
+            d.common.push(String::from(x));
+        }
+        else {
+            d.left_only.push(String::from(x));
+        }
+    }
+    for x in right_onames.into_iter() {
+        if !d.common.contains(&x) {
+            d.right_only.push(String::from(x));
+        }
+    }
+
+    // Iterate only over common files to perform diffs
+    let mut diffs: Vec<Box<Diff>> = Vec::with_capacity(d.common.len());
+    for f in d.common.iter() {
+        diffs.push(Box::new(
+            differ(
+                Path::new(left).join(f).to_str().unwrap(),
+                Path::new(right).join(f).to_str().unwrap()
+            )
+        ));
+    }
+    d.sub_diffs = diffs;
+
+    // Determine if there is a match
+    if d.left_only.len() == 0 && d.right_only.len() == 0 && 
+        d.sub_diffs.iter().all(|a| a.matches) {
+            // Match
+            d.matches = true;
+        }    
+    else {
+        // No match, build report
+        let mut report = format!("{} vs. {}\n", left, right);
+        if d.left_only.len() != 0 {
+            report.push_str(&format!(
+                    "Only in {}: {:#?}\n", left, d.left_only
+            ));
+        }
+        if d.right_only.len() != 0 {
+            report.push_str(&format!(
+                "Only in {}: {:#?}\n", right, d.right_only
+            ));
+        }
+        for subdiff in d.sub_diffs.iter() {
+            if !subdiff.matches {
+                report.push_str(&format!("{}\n", subdiff.report));
+            }
+        }
+        d.report = report
+    }
+
+
+    return d;
+}
+
 
 /// Perform a diff on two files of unknown or binary encoding.
-pub fn diff_bytes<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
+pub fn diff_bytes(left: &str, right: &str) -> Diff {
     // Obtain metadata
     let left_meta = fs::metadata(left).expect("Left file didn't exist");
     let right_meta = fs::metadata(right).expect("Right file didn't exist");
@@ -72,7 +177,7 @@ pub fn diff_bytes<'a>(left: &'a str, right: &'a str) -> Diff<'a> {
     // Check that both left and right are files
     if !(left_meta.is_file()) {
         if !(right_meta.is_file()) {
-            panic!("Left and right are not files!")
+            panic!("{} and {} are not files!", left, right)
         }
         else {
             panic!("Left is not a file!")
