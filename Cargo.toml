@@ -7,6 +7,7 @@ edition = "2018"
 
 [dependencies]
 clap = "2"
+byteorder = "1.4.3"
 
 [dependencies.nifti]
 version = "0.14"

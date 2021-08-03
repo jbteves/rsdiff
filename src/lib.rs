@@ -6,13 +6,14 @@
 
 use std::{
     fs::{self, File},
-    io::{self, BufRead, BufReader},
+    io::{self, BufRead, BufReader, Cursor},
     convert::TryInto,
     path::Path,
     time,
 };
 
-use nifti::{NiftiObject, ReaderOptions, IntoNdArray};
+use nifti::{NiftiObject, ReaderOptions};
+use byteorder::{LittleEndian, ReadBytesExt};
 
 /// Diff
 /// Generalized object for performing abstract diffs.
@@ -272,6 +273,182 @@ pub fn diff_bytes(left: &str, right: &str) -> Diff {
     return d;
 }
 
+pub fn diff_transmute_buffers_f32(left: &[u8], right: &[u8], tolerance: f32 ) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_f32::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_f32::<LittleEndian>() {
+            matches += ((a - b).abs() < tolerance) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
+pub fn diff_transmute_buffers_f64(left: &[u8], right: &[u8], tolerance: f64 ) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_f64::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_f64::<LittleEndian>() {
+            matches += ((a - b).abs() < tolerance) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
+pub fn diff_transmute_buffers_u16(left: &[u8], right: &[u8]) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_u16::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_u16::<LittleEndian>() {
+            matches += (a == b) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
+pub fn diff_transmute_buffers_u32(left: &[u8], right: &[u8]) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_u32::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_u32::<LittleEndian>() {
+            matches += (a == b) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
+pub fn diff_transmute_buffers_i16(left: &[u8], right: &[u8]) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_i16::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_i16::<LittleEndian>() {
+            matches += (a == b) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
+pub fn diff_transmute_buffers_i32(left: &[u8], right: &[u8]) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_i32::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_i32::<LittleEndian>() {
+            matches += (a == b) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
+pub fn diff_transmute_buffers_i64(left: &[u8], right: &[u8]) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_i64::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_i64::<LittleEndian>() {
+            matches += (a == b) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
+pub fn diff_transmute_buffers_u64(left: &[u8], right: &[u8]) -> usize {
+    // Verify arrays match in size
+    if !(left.len() == right.len()) {
+        panic!("Buffers supplied to rsdiff::diff_buffer must have the \
+               same length! Instead, left is size {} and right is size {}",
+               left.len(), right.len());
+    }
+    // Iterate and compare bytes
+    let mut matches: usize = 0;
+    let mut left_rdr = Cursor::new(left);
+    let mut right_rdr = Cursor::new(right);
+    while let Ok(a) = left_rdr.read_u64::<LittleEndian>() {
+        if let Ok(b) = right_rdr.read_u64::<LittleEndian>() {
+            matches += (a == b) as usize;
+        }
+        else {
+            panic!("Catastrophic buffer mismatch failure");
+        }
+    }
+    return matches
+}
+
 /// Diff two niftis
 pub fn diff_nii(left: &str, right: &str) -> Diff {
     const TOLERANCE: f32 = 1e-16;
@@ -287,31 +464,63 @@ pub fn diff_nii(left: &str, right: &str) -> Diff {
     let shapes_match = 
         left_reader.header().dim == right_reader.header().dim;
     if shapes_match {
-        let t0 = time::SystemTime::now();
-        // Read in entire files and see if they match
-        let left_data = left_reader.into_volume().into_ndarray::<f32>()
-            .expect("Cannot read left file as ndarray!");
-        let t1 = time::SystemTime::now();
-        let right_data = right_reader.into_volume().into_ndarray::<f32>()
-            .expect("Cannot read right file as ndarray!");
-        let t2 = time::SystemTime::now();
-        // Iterate over all of left and right, seeing which voxels are
-        // below the tolerance
-        let total_matches = left_data.iter().zip(right_data.iter())
-            .map(|(a, b)| ((a - b).abs() < TOLERANCE) as usize)
-            .sum::<usize>();
-        let t3 = time::SystemTime::now();
-        // FIXME: delete
-        println!(
-            "Time to read left: {}\n\
-            Time to read right: {}\n\
-            Time to perform diff: {}\n",
-            t1.duration_since(t0).expect("Time error").as_millis(),
-            t2.duration_since(t1).expect("Time error").as_millis(),
-            t3.duration_since(t2).expect("Time error").as_millis(),
+        // TODO: build correct shape matcher
+        const KILOBYTE: usize = 1024;
+        const CHUNK_SIZE: usize = 256 * KILOBYTE;
+        const TOLERANCE: f32 = 1e-16;
+        let left_file = File::open(left).expect("Uh-oh!");
+        let right_file = File::open(right).expect("Uh-oh!");
+        let mut left_rdr = BufReader::with_capacity(
+            CHUNK_SIZE, left_file
         );
-        let total_voxels: usize = left_data.shape().iter().product();
-        // See if we match
+        let mut right_rdr = BufReader::with_capacity(
+            CHUNK_SIZE, right_file
+        );
+        let mut total_matches: usize = 0;
+        // Check to see if data types match
+        if left_reader.header().datatype != right_reader.header().datatype {
+            d.report = format!("{} vs {}: Shapes match, types diverge \
+                               ({:?} vs. {:?})",
+                               left, right,
+                               left_reader.header().datatype,
+                               right_reader.header().datatype
+                        );
+            return d;
+        }
+        let dtype = left_reader.header().datatype;
+        // Build a function to run the correct buffer transmuter
+        let buffer_differ = match dtype {
+            4 => |a: &[u8], b: &[u8]| diff_transmute_buffers_i16(a, b),
+            8 => |a: &[u8], b: &[u8]| diff_transmute_buffers_i32(a, b),
+            16 => |a: &[u8], b: &[u8]| diff_transmute_buffers_f32(a, b, TOLERANCE),
+            64 => |a: &[u8], b: &[u8]| diff_transmute_buffers_f64(a, b, TOLERANCE as f64),
+            512 => |a: &[u8], b: &[u8]| diff_transmute_buffers_u16(a, b),
+            768 => |a: &[u8], b: &[u8]| diff_transmute_buffers_u32(a, b),
+            1024 => |a: &[u8], b: &[u8]| diff_transmute_buffers_i64(a, b),
+            1280 => |a: &[u8], b: &[u8]| diff_transmute_buffers_i64(a, b),
+            _ => panic!("Unsupported data type {}, sorry!", dtype),
+        };
+        loop {
+            let length = {
+                let left_buffer = left_rdr.fill_buf().expect("UO");
+                let right_buffer = right_rdr.fill_buf().expect("UO");
+                if left_buffer.len() !=  0 {
+                    total_matches += buffer_differ(&left_buffer, &right_buffer);
+                }
+                left_buffer.len()
+            };
+            left_rdr.consume(length);
+            right_rdr.consume(length);
+            if length == 0 { break; }
+        }
+        let mut total_voxels: usize = 1;
+        for  d in left_reader.header().dim.iter() {
+            let mut value = *d;
+            if value == 0 {
+                value = 1;
+            }
+            total_voxels *= value as usize;
+        }
         if total_voxels == total_matches {
             // Complete match
             d.matches = true
@@ -351,7 +560,7 @@ pub fn diff_nii(left: &str, right: &str) -> Diff {
 
 /// Calculate how many bytes match between two buffers. The buffers must be
 /// of equal size.
-pub fn diff_buffer<'a>(left: &[u8], right: &[u8]) -> usize {
+pub fn diff_buffer(left: &[u8], right: &[u8]) -> usize {
     // Verify arrays match in size
     if !(left.len() == right.len()) {
         panic!("Buffers supplied to rsdiff::diff_buffer must have the \
