@@ -15,6 +15,7 @@ use std::{
 use nifti::{NiftiObject, ReaderOptions};
 use byteorder::{LittleEndian, ReadBytesExt};
 use flate2::read::GzDecoder;
+use colored::*;
 
 /// Diff
 /// Generalized object for performing abstract diffs.
@@ -155,18 +156,30 @@ pub fn diff_directory(left: &str, right: &str) -> Diff {
         // No match, build report
         let mut report = format!("{} vs. {}\n", left, right);
         if d.left_only.len() != 0 {
-            report.push_str(&format!(
-                    "Only in {}: {:#?}\n", left, d.left_only
-            ));
+            report.push_str(&format!("{}",
+                    format!("Only in {}: {}\n", left, d.left_only.join(", ")
+            ).bright_red()));
         }
         if d.right_only.len() != 0 {
-            report.push_str(&format!(
-                "Only in {}: {:#?}\n", right, d.right_only
-            ));
+            report.push_str(&format!("{}",
+                format!("Only in {}: {}\n", right, d.right_only.join(", "))
+            .bright_green()));
         }
+        // Band cyan and magenta for easy reading
+        let mut counts = 0;
         for subdiff in d.sub_diffs.iter() {
             if !subdiff.matches {
-                report.push_str(&format!("{}\n", subdiff.report));
+                counts += 1;
+                if counts % 2 == 0 {
+                    // Bright cyan
+                    report.push_str(&format!("{}",
+                    format!("{}\n", subdiff.report).bright_cyan()));
+                }
+                else {
+                    // Not-bright cyan
+                    report.push_str(&format!("{}",
+                    format!("{}\n", subdiff.report).bright_magenta()));
+                }
             }
         }
         d.report = report
@@ -456,23 +469,42 @@ fn diff_voxels_nii_gz(left: &str, right: &str, vox_offset: usize, buffer_differ:
     const TOLERANCE: f32 = 1e-16;
     let left_file = File::open(left).expect("Uh-oh!");
     let right_file = File::open(right).expect("Uh-oh!");
-    let mut left_buffer = Vec::new();
-    let mut right_buffer = Vec::new();
+    let mut left_buffer = [0u8; CHUNK_SIZE];
+    let mut right_buffer = [0u8; CHUNK_SIZE];
+    let mut place_holder_buffer = Vec::with_capacity(vox_offset);
     let mut left_gz = GzDecoder::new(left_file);
     let mut right_gz = GzDecoder::new(right_file);
-    // Inefficient, but read entire file into memory
-    left_gz.read_to_end(&mut left_buffer).expect("Failed GZ decode");
-    right_gz.read_to_end(&mut right_buffer).expect("Failed GZ decode");
-    // Ignore the offsets
-    let lbuf = &left_buffer[vox_offset..];
-    let rbuf = &right_buffer[vox_offset..];
-    if left_buffer.len() != right_buffer.len() {
-        panic!("Left and right file sizes differ unexpectedly!");
+    // Clear out offsets
+    let _offset_left = left_gz.read_exact(&mut place_holder_buffer)
+        .expect("I can't read the GZ file!");
+    let _offset_right = right_gz.read_exact(&mut place_holder_buffer)
+        .expect("I can't read the right GZ file!");
+    let mut total_matches = 0;
+    // Loop and compare
+    loop {
+        if let Ok(nl) = left_gz.read(&mut left_buffer) {
+            if let Ok(nr) = right_gz.read(&mut right_buffer) {
+                if nl != nr {
+                    panic!("Unexpected file size difference! \
+                    {} reads {}, {} reads {}!",
+                    left, nl,
+                    right, nr
+                    );
+                }
+                if nl == 0 {
+                    break;
+                }
+                total_matches += buffer_differ(&left_buffer[..nl], &right_buffer[..nl]);
+            }
+            else {
+                panic!("Can't read from right buffer!");
+            }
+        }
+        else {
+            panic!("Can't read from left buffer!");
+        }
     }
-    if left_buffer.len() == 0 {
-        panic!("Could not consume bytes from files!");
-    }
-    buffer_differ(lbuf, rbuf)
+    total_matches
 }
 
 fn diff_voxels_nii(left: &str, right: &str, vox_offset: usize, buffer_differ: fn(&[u8], &[u8]) -> usize) -> usize {
