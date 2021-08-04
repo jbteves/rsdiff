@@ -6,7 +6,7 @@
 
 use std::{
     fs::{self, File},
-    io::{self, BufRead, BufReader, Cursor},
+    io::{self, BufRead, BufReader, Cursor, prelude::*},
     convert::TryInto,
     path::Path,
     time,
@@ -14,6 +14,7 @@ use std::{
 
 use nifti::{NiftiObject, ReaderOptions};
 use byteorder::{LittleEndian, ReadBytesExt};
+use flate2::read::GzDecoder;
 
 /// Diff
 /// Generalized object for performing abstract diffs.
@@ -449,6 +450,64 @@ pub fn diff_transmute_buffers_u64(left: &[u8], right: &[u8]) -> usize {
     return matches
 }
 
+fn diff_voxels_nii_gz(left: &str, right: &str, vox_offset: usize, buffer_differ: fn(&[u8], &[u8]) -> usize) -> usize {
+    const KILOBYTE: usize = 1024;
+    const CHUNK_SIZE: usize = 256 * KILOBYTE;
+    const TOLERANCE: f32 = 1e-16;
+    let left_file = File::open(left).expect("Uh-oh!");
+    let right_file = File::open(right).expect("Uh-oh!");
+    let mut left_buffer = Vec::new();
+    let mut right_buffer = Vec::new();
+    let mut left_gz = GzDecoder::new(left_file);
+    let mut right_gz = GzDecoder::new(right_file);
+    // Inefficient, but read entire file into memory
+    left_gz.read_to_end(&mut left_buffer).expect("Failed GZ decode");
+    right_gz.read_to_end(&mut right_buffer).expect("Failed GZ decode");
+    // Ignore the offsets
+    let lbuf = &left_buffer[vox_offset..];
+    let rbuf = &right_buffer[vox_offset..];
+    if left_buffer.len() != right_buffer.len() {
+        panic!("Left and right file sizes differ unexpectedly!");
+    }
+    if left_buffer.len() == 0 {
+        panic!("Could not consume bytes from files!");
+    }
+    buffer_differ(lbuf, rbuf)
+}
+
+fn diff_voxels_nii(left: &str, right: &str, vox_offset: usize, buffer_differ: fn(&[u8], &[u8]) -> usize) -> usize {
+    const KILOBYTE: usize = 1024;
+    const CHUNK_SIZE: usize = 256 * KILOBYTE;
+    const TOLERANCE: f32 = 1e-16;
+    let left_file = File::open(left).expect("Uh-oh!");
+    let right_file = File::open(right).expect("Uh-oh!");
+
+    let mut left_rdr = BufReader::with_capacity(
+        CHUNK_SIZE, left_file
+    );
+    let mut right_rdr = BufReader::with_capacity(
+        CHUNK_SIZE, right_file
+    );
+    let mut total_matches = 0;
+    // Consume the appropriate voxel offset
+    left_rdr.consume(vox_offset);
+    right_rdr.consume(vox_offset);
+    loop {
+        let length = {
+            let left_buffer = left_rdr.fill_buf().expect("UO");
+            let right_buffer = right_rdr.fill_buf().expect("UO");
+            if left_buffer.len() !=  0 {
+                total_matches += buffer_differ(&left_buffer, &right_buffer);
+            }
+            left_buffer.len()
+        };
+        left_rdr.consume(length);
+        right_rdr.consume(length);
+        if length == 0 { break; }
+    }
+    total_matches
+}
+
 /// Diff two niftis
 pub fn diff_nii(left: &str, right: &str) -> Diff {
     const TOLERANCE: f32 = 1e-16;
@@ -464,19 +523,6 @@ pub fn diff_nii(left: &str, right: &str) -> Diff {
     let shapes_match = 
         left_reader.header().dim == right_reader.header().dim;
     if shapes_match {
-        // TODO: build correct shape matcher
-        const KILOBYTE: usize = 1024;
-        const CHUNK_SIZE: usize = 256 * KILOBYTE;
-        const TOLERANCE: f32 = 1e-16;
-        let left_file = File::open(left).expect("Uh-oh!");
-        let right_file = File::open(right).expect("Uh-oh!");
-        let mut left_rdr = BufReader::with_capacity(
-            CHUNK_SIZE, left_file
-        );
-        let mut right_rdr = BufReader::with_capacity(
-            CHUNK_SIZE, right_file
-        );
-        let mut total_matches: usize = 0;
         // Check to see if data types match
         if left_reader.header().datatype != right_reader.header().datatype {
             d.report = format!("{} vs {}: Shapes match, types diverge \
@@ -487,7 +533,9 @@ pub fn diff_nii(left: &str, right: &str) -> Diff {
                         );
             return d;
         }
-        let dtype = left_reader.header().datatype;
+        let hdr = left_reader.header();
+        let dtype = hdr.datatype;
+        let vox_offset = hdr.vox_offset as usize;
         // Build a function to run the correct buffer transmuter
         let buffer_differ = match dtype {
             4 => |a: &[u8], b: &[u8]| diff_transmute_buffers_i16(a, b),
@@ -500,19 +548,14 @@ pub fn diff_nii(left: &str, right: &str) -> Diff {
             1280 => |a: &[u8], b: &[u8]| diff_transmute_buffers_i64(a, b),
             _ => panic!("Unsupported data type {}, sorry!", dtype),
         };
-        loop {
-            let length = {
-                let left_buffer = left_rdr.fill_buf().expect("UO");
-                let right_buffer = right_rdr.fill_buf().expect("UO");
-                if left_buffer.len() !=  0 {
-                    total_matches += buffer_differ(&left_buffer, &right_buffer);
-                }
-                left_buffer.len()
-            };
-            left_rdr.consume(length);
-            right_rdr.consume(length);
-            if length == 0 { break; }
-        }
+        let total_matches = {
+            if left.ends_with("gz") {
+                diff_voxels_nii_gz(left, right, vox_offset, buffer_differ)
+            }
+            else {
+                diff_voxels_nii(left, right, vox_offset, buffer_differ)
+            }
+        };
         let mut total_voxels: usize = 1;
         for  d in left_reader.header().dim.iter() {
             let mut value = *d;

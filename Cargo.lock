@@ -252,6 +252,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "clap",
+ "flate2",
  "nifti",
 ]
 

@@ -9,6 +9,9 @@ edition = "2018"
 clap = "2"
 byteorder = "1.4.3"
 
+[dependencies.flate2]
+version = "1.0.20"
+
 [dependencies.nifti]
 version = "0.14"
 features = ["ndarray_volumes"]
