@@ -1,3 +1,8 @@
+# DON'T USE
+Don't use this.
+It will be supplanted by a new tool in the future.
+Please consider using AFNI's 3dDiff instead.
+
 # What is this?
 This is a highly experimental, fragile, and temperamental tool.
 Use at your own risk.
